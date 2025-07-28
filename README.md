@@ -1,14 +1,32 @@
 # Netty直播系统
 
-基于Netty的简易直播系统，支持RTMP推流和WebSocket实时聊天。
+基于Netty的完整直播系统，支持RTMP推流、WebSocket实时聊天和录播功能。
 
 ## 功能特性
 
 - **多服务器架构**：HTTP服务器、WebSocket服务器、RTMP服务器
 - **实时聊天**：基于WebSocket的实时消息系统
 - **直播间管理**：支持多个直播间，用户管理
-- **推流支持**：简化的RTMP协议支持
+- **推流支持**：标准RTMP协议支持，兼容OBS等推流软件
+- **HLS播放**：自动转换为HLS格式，支持Web播放器播放
+- **录播功能**：实时录制、文件管理、历史记录查看
 - **Web界面**：提供直播间列表和观看页面
+
+## 录播功能
+
+### 核心特性
+- **实时录制**: 支持直播过程中的实时录制
+- **录制管理**: 提供完整的录制API，包括开始、停止、查看、下载、删除
+- **文件管理**: 自动管理录制文件，按房间分类存储
+- **历史记录**: 支持查看所有录制历史和活跃录制状态
+
+### API接口
+- `POST /api/record/start?roomId=xxx` - 开始录制
+- `POST /api/record/stop?roomId=xxx` - 停止录制
+- `GET /api/record/list` - 获取活跃录制列表
+- `GET /api/record/history?roomId=xxx` - 获取录制历史
+- `GET /api/record/download?roomId=xxx&recordId=xxx` - 下载录制文件
+- `DELETE /api/record/delete?roomId=xxx&recordId=xxx` - 删除录制文件
 
 ## 系统架构
 

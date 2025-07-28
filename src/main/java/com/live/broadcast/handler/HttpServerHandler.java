@@ -3,6 +3,8 @@ package com.live.broadcast.handler;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.live.broadcast.manager.LiveRoomManager;
 import com.live.broadcast.model.LiveRoom;
+import com.live.broadcast.record.RecordService;
+import com.live.broadcast.record.RecordInfo;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
@@ -15,8 +17,12 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.HashMap;
+import java.util.Map;
 import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Map;
@@ -42,6 +48,8 @@ public class HttpServerHandler extends SimpleChannelInboundHandler<FullHttpReque
                 handleRoomsApi(ctx, request);
             } else if (uri.startsWith("/api/room/")) {
                 handleRoomApi(ctx, request, uri);
+            } else if (uri.startsWith("/api/record")) {
+                handleRecordApi(ctx, request, uri);
             } else if (uri.equals("/live.html")) {
                 sendHtmlPage(ctx, request, "live.html");
             } else if (uri.equals("/viewer.html")) {
@@ -363,6 +371,247 @@ public class HttpServerHandler extends SimpleChannelInboundHandler<FullHttpReque
                 "document.getElementById('messageInput').addEventListener('keypress',function(e){if(e.key==='Enter'){sendMessage();}});" +
                 "document.addEventListener('DOMContentLoaded',connectWebSocket);" +
                 "</script></body></html>";
+    }
+    
+    /**
+     * 处理录播API
+     */
+    private void handleRecordApi(ChannelHandlerContext ctx, FullHttpRequest request, String uri) throws Exception {
+        String[] parts = uri.split("/");
+        
+        if (parts.length >= 4) {
+            String action = parts[3]; // record后的动作
+            
+            switch (action) {
+                case "start":
+                    handleStartRecord(ctx, request);
+                    break;
+                case "stop":
+                    handleStopRecord(ctx, request);
+                    break;
+                case "list":
+                    handleListRecords(ctx, request);
+                    break;
+                case "history":
+                    handleRecordHistory(ctx, request);
+                    break;
+                case "download":
+                    handleDownloadRecord(ctx, request, uri);
+                    break;
+                case "delete":
+                    handleDeleteRecord(ctx, request);
+                    break;
+                default:
+                    sendNotFound(ctx, request);
+            }
+        } else {
+            sendBadRequest(ctx, request, "API路径不正确");
+        }
+    }
+    
+    /**
+     * 开始录制
+     */
+    private void handleStartRecord(ChannelHandlerContext ctx, FullHttpRequest request) throws Exception {
+        if (request.method() != HttpMethod.POST) {
+            sendMethodNotAllowed(ctx, request);
+            return;
+        }
+        
+        String roomId = getQueryParameter(request.uri(), "roomId");
+        if (roomId == null || roomId.isEmpty()) {
+            sendBadRequest(ctx, request, "roomId参数不能为空");
+            return;
+        }
+        
+        boolean success = RecordService.getInstance().startRecord(roomId);
+        Map<String, Object> response = new HashMap<>();
+        
+        if (success) {
+            response.put("code", 200);
+            response.put("message", "开始录制成功");
+            response.put("data", RecordService.getInstance().getRecordInfo(roomId));
+        } else {
+            response.put("code", 400);
+            response.put("message", "开始录制失败");
+            response.put("data", null);
+        }
+        
+        sendJsonResponse(ctx, request, response);
+    }
+    
+    /**
+     * 停止录制
+     */
+    private void handleStopRecord(ChannelHandlerContext ctx, FullHttpRequest request) throws Exception {
+        if (request.method() != HttpMethod.POST) {
+            sendMethodNotAllowed(ctx, request);
+            return;
+        }
+        
+        String roomId = getQueryParameter(request.uri(), "roomId");
+        if (roomId == null || roomId.isEmpty()) {
+            sendBadRequest(ctx, request, "roomId参数不能为空");
+            return;
+        }
+        
+        boolean success = RecordService.getInstance().stopRecord(roomId);
+        Map<String, Object> response = new HashMap<>();
+        
+        if (success) {
+            response.put("code", 200);
+            response.put("message", "停止录制成功");
+        } else {
+            response.put("code", 400);
+            response.put("message", "停止录制失败");
+        }
+        response.put("data", null);
+        
+        sendJsonResponse(ctx, request, response);
+    }
+    
+    /**
+     * 获取活跃录制列表
+     */
+    private void handleListRecords(ChannelHandlerContext ctx, FullHttpRequest request) throws Exception {
+        if (request.method() != HttpMethod.GET) {
+            sendMethodNotAllowed(ctx, request);
+            return;
+        }
+        
+        Map<String, RecordInfo> activeRecords = RecordService.getInstance().getAllActiveRecords();
+        Map<String, Object> response = new HashMap<>();
+        response.put("code", 200);
+        response.put("message", "success");
+        response.put("data", activeRecords);
+        
+        sendJsonResponse(ctx, request, response);
+    }
+    
+    /**
+     * 获取录制历史
+     */
+    private void handleRecordHistory(ChannelHandlerContext ctx, FullHttpRequest request) throws Exception {
+        if (request.method() != HttpMethod.GET) {
+            sendMethodNotAllowed(ctx, request);
+            return;
+        }
+        
+        String roomId = getQueryParameter(request.uri(), "roomId");
+        Map<String, Object> response = new HashMap<>();
+        
+        if (roomId != null && !roomId.isEmpty()) {
+            response.put("data", RecordService.getInstance().getHistoryRecords(roomId));
+        } else {
+            response.put("data", RecordService.getInstance().getAllHistoryRecords());
+        }
+        
+        response.put("code", 200);
+        response.put("message", "success");
+        sendJsonResponse(ctx, request, response);
+    }
+    
+    /**
+     * 下载录制文件
+     */
+    private void handleDownloadRecord(ChannelHandlerContext ctx, FullHttpRequest request, String uri) throws Exception {
+        if (request.method() != HttpMethod.GET) {
+            sendMethodNotAllowed(ctx, request);
+            return;
+        }
+        
+        String roomId = getQueryParameter(request.uri(), "roomId");
+        String recordId = getQueryParameter(request.uri(), "recordId");
+        
+        if (roomId == null || recordId == null) {
+            sendBadRequest(ctx, request, "roomId和recordId参数不能为空");
+            return;
+        }
+        
+        String filePath = "records/" + roomId + "/" + recordId + ".mp4";
+        Path path = Paths.get(filePath);
+        
+        if (!Files.exists(path)) {
+            sendNotFound(ctx, request);
+            return;
+        }
+        
+        try {
+            byte[] content = Files.readAllBytes(path);
+            
+            FullHttpResponse response = new DefaultFullHttpResponse(
+                    HttpVersion.HTTP_1_1,
+                    HttpResponseStatus.OK,
+                    Unpooled.copiedBuffer(content)
+            );
+            
+            response.headers().set(HttpHeaderNames.CONTENT_TYPE, "video/mp4");
+            response.headers().set(HttpHeaderNames.CONTENT_LENGTH, response.content().readableBytes());
+            response.headers().set(HttpHeaderNames.CONTENT_DISPOSITION, 
+                    "attachment; filename=\"" + recordId + ".mp4\"");
+            
+            if (HttpUtil.isKeepAlive(request)) {
+                response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE);
+                ctx.write(response);
+            } else {
+                ctx.write(response).addListener(ChannelFutureListener.CLOSE);
+            }
+            ctx.flush();
+            
+        } catch (IOException e) {
+            logger.error("读取录制文件失败: {}", filePath, e);
+            sendNotFound(ctx, request);
+        }
+    }
+    
+    /**
+     * 删除录制文件
+     */
+    private void handleDeleteRecord(ChannelHandlerContext ctx, FullHttpRequest request) throws Exception {
+        if (request.method() != HttpMethod.DELETE && request.method() != HttpMethod.POST) {
+            sendMethodNotAllowed(ctx, request);
+            return;
+        }
+        
+        String roomId = getQueryParameter(request.uri(), "roomId");
+        String recordId = getQueryParameter(request.uri(), "recordId");
+        
+        if (roomId == null || recordId == null) {
+            sendBadRequest(ctx, request, "roomId和recordId参数不能为空");
+            return;
+        }
+        
+        boolean success = RecordService.getInstance().deleteRecord(roomId, recordId);
+        Map<String, Object> response = new HashMap<>();
+        
+        if (success) {
+            response.put("code", 200);
+            response.put("message", "删除成功");
+        } else {
+            response.put("code", 400);
+            response.put("message", "删除失败");
+        }
+        response.put("data", null);
+        
+        sendJsonResponse(ctx, request, response);
+    }
+    
+    /**
+     * 获取URL查询参数
+     */
+    private String getQueryParameter(String uri, String paramName) {
+        if (uri.contains("?")) {
+            String queryString = uri.substring(uri.indexOf("?") + 1);
+            String[] params = queryString.split("&");
+            
+            for (String param : params) {
+                String[] keyValue = param.split("=");
+                if (keyValue.length == 2 && keyValue[0].equals(paramName)) {
+                    return keyValue[1];
+                }
+            }
+        }
+        return null;
     }
     
     @Override

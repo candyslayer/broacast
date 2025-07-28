@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.live.broadcast.model.LiveRoom;
 import com.live.broadcast.model.LiveUser;
 import com.live.broadcast.model.Message;
+import com.live.broadcast.record.RecordService;
 import io.netty.channel.Channel;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import org.slf4j.Logger;
@@ -188,6 +189,10 @@ public class LiveRoomManager {
             room.setLive(true);
             Message liveStartMessage = new Message("live_start", "直播开始", roomId);
             broadcastToRoom(roomId, liveStartMessage);
+            
+            // 通知录播服务
+            RecordService.getInstance().onLiveStart(roomId);
+            
             logger.info("直播间 {} 开始直播", roomId);
         }
     }
@@ -201,6 +206,10 @@ public class LiveRoomManager {
             room.setLive(false);
             Message liveStopMessage = new Message("live_stop", "直播结束", roomId);
             broadcastToRoom(roomId, liveStopMessage);
+            
+            // 通知录播服务
+            RecordService.getInstance().onLiveStop(roomId);
+            
             logger.info("直播间 {} 停止直播", roomId);
         }
     }
